@@ -1,3 +1,6 @@
 <resources>
     <string name="app_name">GymActivitySensor</string>
+
+    <string name="sensoractivity_button">Start measuring activity</string>
+    <string name="sensoractivity_text">Sensor activity</string>
 </resources>
