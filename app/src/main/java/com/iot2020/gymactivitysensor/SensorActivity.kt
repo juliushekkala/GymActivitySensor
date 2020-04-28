@@ -10,12 +10,16 @@ import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
 import android.os.Bundle
-import android.os.PersistableBundle
 import android.util.Log
+import android.widget.Toast
+import androidx.annotation.UiThread
 import androidx.appcompat.app.AppCompatActivity
 import kotlinx.android.synthetic.main.activity_sensor.*
 import java.io.IOException
 import java.util.*
+import kotlin.math.pow
+import kotlin.math.round
+import kotlin.math.sqrt
 
 class SensorActivity : AppCompatActivity(), SensorEventListener {
 
@@ -31,7 +35,17 @@ class SensorActivity : AppCompatActivity(), SensorEventListener {
 
     val bluetoothAdapter: BluetoothAdapter? = BluetoothAdapter.getDefaultAdapter()
 
-     var MY_UUID = UUID.fromString("d2e1c93a-887d-11ea-bc55-0242ac130003")
+    var MY_UUID = UUID.fromString("d2e1c93a-887d-11ea-bc55-0242ac130003")
+
+    var stepCounter = 0
+
+    var accelerationList = mutableListOf<Float>()
+
+    var lastSendTime = System.currentTimeMillis()
+
+    private var connectedToServer = false
+
+
 
 
     private var REQUEST_ENABLE_BT = 1
@@ -52,41 +66,42 @@ class SensorActivity : AppCompatActivity(), SensorEventListener {
         sensorManager.getDefaultSensor(Sensor.TYPE_STEP_DETECTOR)?.let {
             this.stepDetectorSensor = it
         }
-        //Bluetooth https://developer.android.com/guide/topics/connectivity/bluetooth.html
-
-        if (bluetoothAdapter == null) {
-            // Device doesn't support Bluetooth
-            finish()
-        }
-        if (bluetoothAdapter?.isEnabled == false) {
-            val enableBtIntent = Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE)
-            startActivityForResult(enableBtIntent, REQUEST_ENABLE_BT)
-        }
-
-        var thread: ConnectThread
-        val pairedDevices: Set<BluetoothDevice>? = bluetoothAdapter?.bondedDevices
-        pairedDevices?.forEach { device ->
-            val deviceName = device.name
-            val deviceHardwareAddress = device.address // MAC address
-            Log.d("Socket", deviceName)
-            Log.d("Socket", deviceHardwareAddress)
-             if (deviceName == DEVICE_NAME) {
-                 btDevice = device
-                 thread = ConnectThread(btDevice)
-                 thread.run()
-
-
-            }
-        }
 
         closeConnectionButton.setOnClickListener {
             cancel(btSocket)
 
         }
 
-        sendMessageButton.setOnClickListener {
-            val sendData = SendDataToServer(btSocket, "Test message".toByteArray(Charsets.UTF_8))
-            sendData.run()
+        startConnectionButton.setOnClickListener {
+            //Bluetooth https://developer.android.com/guide/topics/connectivity/bluetooth.html
+
+            if (bluetoothAdapter == null) {
+                // Device doesn't support Bluetooth
+                finish()
+            }
+            if (bluetoothAdapter?.isEnabled == false) {
+                val enableBtIntent = Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE)
+                startActivityForResult(enableBtIntent, REQUEST_ENABLE_BT)
+            }
+
+            var thread: ConnectThread
+            val pairedDevices: Set<BluetoothDevice>? = bluetoothAdapter?.bondedDevices
+            pairedDevices?.forEach { device ->
+                val deviceName = device.name
+                val deviceHardwareAddress = device.address // MAC address
+                Log.d("Socket", deviceName)
+                Log.d("Socket", deviceHardwareAddress)
+                if (deviceName == DEVICE_NAME) {
+                    btDevice = device
+                    thread = ConnectThread(btDevice)
+                    thread.run()
+
+
+                }
+            }
+
+            //Init time variable
+            lastSendTime = System.currentTimeMillis()
         }
 
 
@@ -98,23 +113,49 @@ class SensorActivity : AppCompatActivity(), SensorEventListener {
     }
 
     override fun onSensorChanged(event: SensorEvent?) {
+        if (!connectedToServer) {
+            return
+        }
         //Adapted from https://stackoverflow.com/a/32803134
         if (event?.sensor?.type == Sensor.TYPE_LINEAR_ACCELERATION)  {
-            //TODO: Send via bluetooth
+            //Calculate acceleration
+            var acceleration = sqrt(
+                event.values[0].pow(2) +
+                event.values[1].pow(2) +
+                event.values[2].pow(2))
+            //Add to the list
+            accelerationList.add(acceleration)
+            val currentTime = System.currentTimeMillis()
+            //If over 1 second from last time data was sent, send data to server
+            if (currentTime - lastSendTime > 1000) {
+                //average of the acceleration values since last time sent
+                val accelerationAvr = accelerationList.average()
+                //Not as much accuracy is needed
+                val roundedAccelerationAvr = round(accelerationAvr * 1000) / 1000
+                //Payload
+                val data = ("$roundedAccelerationAvr,$stepCounter").toByteArray(Charsets.UTF_8)
+                var dataSend = SendDataToServer(btSocket, data)
+                dataSend.run()
+                accelerationList.clear()
+                stepCounter = 0
+            }
+
+
             return
 
+            //If step detector, add 1 step to the counter
         } else if (event?.sensor?.type == Sensor.TYPE_STEP_DETECTOR) {
-            //TODO: Send via bluetooth
+            stepCounter += 1
             return
         }
     }
 
     override fun onResume() {
         super.onResume()
-      //  sensorManager.registerListener(
-       //     this, this.linearAccelerationSensor, SensorManager.SENSOR_DELAY_NORMAL)
-       // sensorManager.registerListener(
-        //    this, this.stepDetectorSensor, SensorManager.SENSOR_DELAY_NORMAL)
+        sensorManager.registerListener(
+            this, this.linearAccelerationSensor, SensorManager.SENSOR_DELAY_NORMAL)
+        sensorManager.registerListener(
+            this, this.stepDetectorSensor, SensorManager.SENSOR_DELAY_NORMAL)
     }
 
     override fun onPause() {
@@ -135,17 +176,36 @@ class SensorActivity : AppCompatActivity(), SensorEventListener {
 
             // Connect to the remote device through the socket. This call blocks
             // until it succeeds or throws an exception.
-            mmSocket?.connect()
-
-            // The connection attempt succeeded. Perform work associated with
-            // the connection in a separate thread.
-            manageMyConnectedSocket(mmSocket!!)
-
+            try {
+                mmSocket?.connect()
+                // The connection attempt succeeded. Perform work associated with
+                // the connection in a separate thread.
+                manageMyConnectedSocket(mmSocket!!)
+            } catch (e: IOException) {
+                runOnUiThread(Runnable {
+                    Toast.makeText(
+                        applicationContext, "Could not connect to the Bluetooth server",
+                        Toast.LENGTH_LONG
+                    ).show()
+                })
+            }
         }
+
+
+
+
+
 
         fun manageMyConnectedSocket(socket: BluetoothSocket) {
             btSocket = socket
             Log.d("Socket", "Socket connected")
+            runOnUiThread(Runnable {
+                Toast.makeText(
+                    applicationContext, "Connected to the Bluetooth server",
+                    Toast.LENGTH_LONG
+                ).show()
+            })
+            connectedToServer = true
             return
         }
     }
@@ -157,13 +217,9 @@ class SensorActivity : AppCompatActivity(), SensorEventListener {
 
         override fun run() {
 
-            Log.d("Socket", data.get(0).toString())
-            Log.d("Socket", socket.isConnected.toString())
             try {
                 val output = socket.outputStream
-                output.flush()
                 output.write(data)
-                output.flush()
             } catch (e: IOException) {
                 Log.e("Socket", "Error sending data", e)
 
@@ -179,7 +235,8 @@ class SensorActivity : AppCompatActivity(), SensorEventListener {
     fun cancel(mmSocket: BluetoothSocket) {
         try {
             mmSocket?.close()
-            Log.d("Socket", "closed connection")
+            Toast.makeText(applicationContext, "Connnection was closed", Toast.LENGTH_LONG).show()
+            connectedToServer = false
         } catch (e: IOException) {
             Log.e("GymActivitySensor", "Could not close the client socket", e)
         }
