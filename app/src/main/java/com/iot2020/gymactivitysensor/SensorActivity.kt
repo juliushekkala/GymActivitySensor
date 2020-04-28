@@ -86,17 +86,14 @@ class SensorActivity : AppCompatActivity(), SensorEventListener {
 
             var thread: ConnectThread
             val pairedDevices: Set<BluetoothDevice>? = bluetoothAdapter?.bondedDevices
-            pairedDevices?.forEach { device ->
+            pairedDevices?.forEach loop@{ device ->
                 val deviceName = device.name
                 val deviceHardwareAddress = device.address // MAC address
-                Log.d("Socket", deviceName)
-                Log.d("Socket", deviceHardwareAddress)
                 if (deviceName == DEVICE_NAME) {
                     btDevice = device
                     thread = ConnectThread(btDevice)
                     thread.run()
-
-
+                    return@loop
                 }
             }
 
