@@ -19,7 +19,7 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
-        <activity android:name="com.iot2020.gymactivitysensor.SensorActivity"></activity>
+        <activity android:name="com.iot2020.gymactivitysensor.SensorActivity" android:screenOrientation="portrait"></activity>
 
     </application>
 </manifest>
