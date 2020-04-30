@@ -68,7 +68,10 @@ class SensorActivity : AppCompatActivity(), SensorEventListener {
         }
 
         closeConnectionButton.setOnClickListener {
-            cancel(btSocket)
+            if (connectedToServer) {
+                cancel(btSocket)
+            }
+
 
         }
 
