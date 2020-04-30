@@ -3,4 +3,6 @@
 
     <string name="sensoractivity_button">Start measuring activity</string>
     <string name="sensoractivity_text">Sensor activity</string>
+    <string name="connect_text">Connect to the server</string>
+    <string name="disconnect_text">Close connection</string>
 </resources>
